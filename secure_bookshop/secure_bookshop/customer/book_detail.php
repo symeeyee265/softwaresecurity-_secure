@@ -64,7 +64,7 @@ if (isset($_POST['add_to_cart']) && $book_id) {
     $stmt = mysqli_prepare($conn, "INSERT INTO cart (user_id, book_id, quantity) VALUES (?,?,?)");
     mysqli_stmt_bind_param($stmt, "iii", $user_id, $book_id, $quantity);
     if (mysqli_stmt_execute($stmt)) {
-        echo "<script>alert('Added to cart!'); window.location='cart.php';</script>";
+        echo "<script>alert('Added to cart!'); window.location='cart_unsecure.php';</script>";
     } else {
         echo "<script>alert('Error adding to cart: ".mysqli_error($conn)."'); window.location='book_detail.php?id=$book_id';</script>";
     }
