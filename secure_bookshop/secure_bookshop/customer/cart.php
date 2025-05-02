@@ -16,14 +16,18 @@ $user_id = $_SESSION['user_id']; // No validation if not logged in
 if (isset($_GET['delete']) && isset($_GET['csrf_token']) && $_GET['csrf_token'] === $_SESSION['csrf_token']) {
     $cart_id = $_GET['delete'];
     $stmt = mysqli_prepare($conn, "DELETE FROM cart WHERE id =? AND user_id =?");
-    mysqli_stmt_bind_param($stmt, "ii", $cart_id, $user_id);
-    mysqli_stmt_execute($stmt);
-    if (mysqli_stmt_affected_rows($stmt) > 0) {
-        echo "<script>alert('Item removed!'); window.location='cart.php';</script>";
+    if (!$stmt) {
+        echo "<script>alert('Failed to prepare delete statement: ". mysqli_error($conn). "'); window.location='cart.php';</script>";
     } else {
-        echo "<script>alert('Failed to remove item!'); window.location='cart.php';</script>";
+        mysqli_stmt_bind_param($stmt, "ii", $cart_id, $user_id);
+        mysqli_stmt_execute($stmt);
+        if (mysqli_stmt_affected_rows($stmt) > 0) {
+            echo "<script>alert('Item removed!'); window.location='cart.php';</script>";
+        } else {
+            echo "<script>alert('Failed to remove item!'); window.location='cart.php';</script>";
+        }
+        mysqli_stmt_close($stmt);
     }
-    mysqli_stmt_close($stmt);
 }
 
 // Update cart quantity
@@ -34,34 +38,45 @@ if (isset($_GET['update']) && isset($_GET['quantity']) && isset($_GET['csrf_toke
         echo "<script>alert('Please enter a minimum quantity of 1!'); window.location='cart.php';</script>";
     } else {
         $stmt = mysqli_prepare($conn, "UPDATE cart SET quantity =? WHERE id =? AND user_id =?");
-        mysqli_stmt_bind_param($stmt, "iii", $quantity, $cart_id, $user_id);
-        mysqli_stmt_execute($stmt);
-        if (mysqli_stmt_affected_rows($stmt) > 0) {
-            echo "<script>alert('Quantity updated!'); window.location='cart.php';</script>";
+        if (!$stmt) {
+            echo "<script>alert('Failed to prepare update statement: ". mysqli_error($conn). "'); window.location='cart.php';</script>";
         } else {
-            echo "<script>alert('Failed to update quantity!'); window.location='cart.php';</script>";
+            mysqli_stmt_bind_param($stmt, "iii", $quantity, $cart_id, $user_id);
+            mysqli_stmt_execute($stmt);
+            if (mysqli_stmt_affected_rows($stmt) > 0) {
+                echo "<script>alert('Quantity updated!'); window.location='cart.php';</script>";
+            } else {
+                echo "<script>alert('Failed to update quantity!'); window.location='cart.php';</script>";
+            }
+            mysqli_stmt_close($stmt);
         }
-        mysqli_stmt_close($stmt);
     }
 }
 
 // Simulate receiving a message and inserting it into the database
 if (isset($_POST['message']) && isset($_POST['csrf_token']) && $_POST['csrf_token'] === $_SESSION['csrf_token']) {
     $message = $_POST['message'];
-    // Sanitize input on the server side
-    $message = preg_replace('/[^a-zA-Z0-9., ]/', '', $message);
-    // Check for XSS script
-    if (preg_match('/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/i', $message)) {
-        echo "<script>alert('You got an XSS injection!'); window.location='cart.php';</script>";
+    // Input filtering on the server side, only allow letters, numbers, !, ., ,
+    if (preg_match('/[^a-zA-Z0-9!., ]/', $message)) {
+        echo "<script>alert('Please enter only letters, numbers, !, ., ,'); window.location='cart.php';</script>";
     } else {
-        $stmt = mysqli_prepare($conn, "INSERT INTO seller_messages (user_id, message) VALUES (?,?)");
-        mysqli_stmt_bind_param($stmt, "is", $user_id, $message);
-        if (mysqli_stmt_execute($stmt)) {
-            echo "<script>alert('Message sent!'); window.location='cart.php';</script>";
+        // Check for XSS script
+        if (preg_match('/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/i', $message)) {
+            echo "<script>alert('You got an XSS injection!'); window.location='cart.php';</script>";
         } else {
-            echo "<script>alert('Failed to send message: ". mysqli_error($conn). "'); window.location='cart.php';</script>";
+            $stmt = mysqli_prepare($conn, "INSERT INTO seller_messages (user_id, message) VALUES (?,?)");
+            if (!$stmt) {
+                echo "<script>alert('Failed to prepare insert statement: ". mysqli_error($conn). "'); window.location='cart.php';</script>";
+            } else {
+                mysqli_stmt_bind_param($stmt, "is", $user_id, $message);
+                if (mysqli_stmt_execute($stmt)) {
+                    echo "<script>alert('Message sent!'); window.location='cart.php';</script>";
+                } else {
+                    echo "<script>alert('Failed to send message: ". mysqli_error($conn). "'); window.location='cart.php';</script>";
+                }
+                mysqli_stmt_close($stmt);
+            }
         }
-        mysqli_stmt_close($stmt);
     }
 }
 
@@ -70,22 +85,27 @@ $stmt = mysqli_prepare($conn, "SELECT cart.*, books.title, books.price
                                FROM cart 
                                JOIN books ON cart.book_id = books.id 
                                WHERE cart.user_id =?");
-mysqli_stmt_bind_param($stmt, "i", $user_id);
-mysqli_stmt_execute($stmt);
-$cart_items = mysqli_stmt_get_result($stmt);
+if (!$stmt) {
+    echo "<script>alert('Failed to prepare select statement: ". mysqli_error($conn). "'); window.location='cart.php';</script>";
+} else {
+    mysqli_stmt_bind_param($stmt, "i", $user_id);
+    mysqli_stmt_execute($stmt);
+    $cart_items = mysqli_stmt_get_result($stmt);
 
-// Calculate total
-$total = 0;
-$itemCount = 0;
-$cartData = [];
-while ($row = mysqli_fetch_assoc($cart_items)) {
-    $subtotal = $row['price'] * $row['quantity'];
-    $total += $subtotal;
-    $itemCount++;
-    $cartData[] = $row;
+    // Calculate total
+    $total = 0;
+    $itemCount = 0;
+    $cartData = [];
+    while ($row = mysqli_fetch_assoc($cart_items)) {
+        $subtotal = $row['price'] * $row['quantity'];
+        $total += $subtotal;
+        $itemCount++;
+        $cartData[] = $row;
+    }
+    // Reset result pointer to start
+    mysqli_data_seek($cart_items, 0);
+    mysqli_stmt_close($stmt);
 }
-// Reset result pointer to start
-mysqli_data_seek($cart_items, 0);
 ?>
 
 <!DOCTYPE html>
@@ -222,8 +242,9 @@ mysqli_data_seek($cart_items, 0);
                 <?php echo "$itemCount items"; ?>
             </div>
             <?php
-            foreach ($cartData as $index => $row) {
-                $subtotal = $row['price'] * $row['quantity'];
+            if (isset($cartData)) {
+                foreach ($cartData as $index => $row) {
+                    $subtotal = $row['price'] * $row['quantity'];
             ?>
                 <div class="cart-item">
                     <div class="cart-item-info">
@@ -238,6 +259,7 @@ mysqli_data_seek($cart_items, 0);
                     <div class="delete-btn" onclick="deleteItem(<?php echo $row['id']; ?>, '<?php echo $_SESSION['csrf_token']; ?>')"><i class="fas fa-times"></i></div>
                 </div>
             <?php
+                }
             }
             ?>
             <a href="explore.php" class="back-to-shop">← Back to shop</a>
@@ -270,7 +292,7 @@ mysqli_data_seek($cart_items, 0);
     </div>
 
     <script>
-        const cartData = <?php echo json_encode($cartData); ?>;
+        const cartData = <?php echo json_encode($cartData?? []); ?>;
 
         function changeQuantity(index, delta) {
             const input = document.querySelector(`input[onchange*='updateQuantity(${index},']`);
@@ -316,7 +338,12 @@ mysqli_data_seek($cart_items, 0);
         }
 
         function sanitizeInput(input) {
-            input.value = input.value.replace(/[^a-zA-Z0-9., ]/g, '');
+            // Front-end input filtering, only allow letters, numbers, !, ., ,
+            const regex = /[^a-zA-Z0-9!., ]/g;
+            if (regex.test(input.value)) {
+                alert('Please enter only letters, numbers, !, ., ,');
+                input.value = input.value.replace(regex, '');
+            }
         }
 
         // Test for XSS
